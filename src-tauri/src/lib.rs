@@ -1,6 +1,7 @@
-use std::{sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
-use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, fs, sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
@@ -14,25 +15,44 @@ impl Default for Settings {
     fn default() -> Self { Self { unit: "km".into(), ppi: 96.0 } }
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct StoredData {
+    all_time_pixels: f64,
+    days: BTreeMap<String, f64>,
+    settings: Settings,
+}
 struct Tracker {
+    data: StoredData,
     session_pixels: f64,
+    paused: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Snapshot {
+    session_pixels: f64,
+    today_pixels: f64,
     all_time_pixels: f64,
     paused: bool,
     settings: Settings,
 }
 type SharedTracker = Arc<Mutex<Tracker>>;
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Snapshot {
-    session_pixels: f64,
-    all_time_pixels: f64,
-    paused: bool,
-    settings: Settings,
+fn data_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path().app_data_dir().expect("app data directory").join("tracker.json")
 }
-
+fn load(app: &AppHandle) -> StoredData {
+    fs::read_to_string(data_path(app)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+fn persist(app: &AppHandle, tracker: &Tracker) {
+    let path = data_path(app);
+    if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+    if let Ok(json) = serde_json::to_string_pretty(&tracker.data) { let _ = fs::write(path, json); }
+}
 fn snapshot(t: &Tracker) -> Snapshot {
-    Snapshot { session_pixels: t.session_pixels, all_time_pixels: t.all_time_pixels, paused: t.paused, settings: t.settings.clone() }
+    let today = Local::now().date_naive();
+    let today_px = t.data.days.get(&today.format("%Y-%m-%d").to_string()).copied().unwrap_or(0.0);
+    Snapshot { session_pixels: t.session_pixels, today_pixels: today_px, all_time_pixels: t.data.all_time_pixels, paused: t.paused, settings: t.data.settings.clone() }
 }
 fn formatted(px: f64, settings: &Settings) -> String {
     let inches = px / settings.ppi.max(1.0);
@@ -56,12 +76,14 @@ fn get_snapshot(state: State<'\''_, SharedTracker>) -> Snapshot { snapshot(&stat
 fn toggle_tracking(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
     let mut t = state.lock().unwrap();
     t.paused = !t.paused;
+    persist(&app, &t);
     snapshot(&t)
 }
 #[tauri::command]
 fn reset_session(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
     let mut t = state.lock().unwrap();
     t.session_pixels = 0.0;
+    persist(&app, &t);
     snapshot(&t)
 }
 #[tauri::command]
@@ -69,7 +91,8 @@ fn update_settings(app: AppHandle, state: State<'\''_, SharedTracker>, settings:
     if settings.ppi < 20.0 || settings.ppi > 1000.0 { return Err("PPI must be between 20 and 1000".into()); }
     if !["px", "m", "km"].contains(&settings.unit.as_str()) { return Err("Invalid unit".into()); }
     let mut t = state.lock().unwrap();
-    t.settings = settings;
+    t.data.settings = settings;
+    persist(&app, &t);
     Ok(snapshot(&t))
 }
 
@@ -77,6 +100,7 @@ fn start_tracker(app: AppHandle, shared: SharedTracker) {
     thread::spawn(move || {
         let mut previous: Option<(i32, i32)> = None;
         let mut last_publish = Instant::now();
+        let mut last_save = Instant::now();
         loop {
             #[cfg(target_os = "windows")]
             let current = unsafe {
@@ -93,7 +117,8 @@ fn start_tracker(app: AppHandle, shared: SharedTracker) {
                     let mut t = shared.lock().unwrap();
                     if !t.paused {
                         t.session_pixels += distance;
-                        t.all_time_pixels += distance;
+                        t.data.all_time_pixels += distance;
+                        *t.data.days.entry(Local::now().format("%Y-%m-%d").to_string()).or_default() += distance;
                     }
                 }
                 previous = Some(pos);
@@ -102,6 +127,10 @@ fn start_tracker(app: AppHandle, shared: SharedTracker) {
                 let snap = { snapshot(&shared.lock().unwrap()) };
                 let _ = app.emit("tracker-update", &snap);
                 last_publish = Instant::now();
+            }
+            if last_save.elapsed() >= Duration::from_secs(10) {
+                persist(&app, &shared.lock().unwrap());
+                last_save = Instant::now();
             }
             thread::sleep(Duration::from_millis(16));
         }
@@ -113,7 +142,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let tracker = Arc::new(Mutex::new(Tracker { session_pixels: 0.0, all_time_pixels: 0.0, paused: false, settings: Settings::default() }));
+            let tracker = Arc::new(Mutex::new(Tracker { data: load(app.handle()), session_pixels: 0.0, paused: false }));
             app.manage(tracker.clone());
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("valid tray icon");
             let window_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")).expect("valid window icon");
@@ -130,16 +159,14 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                        show_window(tray.app_handle());
-                    }
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event { show_window(tray.app_handle()); }
                 })
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_window(app),
                     "hide" => { if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); } },
-                    "pause" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.paused = !t.paused; },
-                    "reset" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.session_pixels = 0.0; },
-                    "quit" => { app.exit(0); },
+                    "pause" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.paused = !t.paused; persist(app, &t); },
+                    "reset" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.session_pixels = 0.0; persist(app, &t); },
+                    "quit" => { let state = app.state::<SharedTracker>(); persist(app, &state.lock().unwrap()); app.exit(0); },
                     _ => {}
                 })
                 .build(app)?;
