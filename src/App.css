@@ -1,0 +1,43 @@
+:root {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #f1f1f2;
+  background: #0f0f10;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 420px; min-height: 100vh; background: #0f0f10; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+
+.app-shell {
+  width: 100%;
+  max-width: 500px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero {
+  height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  border-radius: 16px;
+  background: #1c1c1f;
+  color: white;
+}
+
+.hero p {
+  margin: 7px 0 8px;
+  color: #a7a7ad;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.app-logo { width: 48px; height: 48px; object-fit: contain; }
