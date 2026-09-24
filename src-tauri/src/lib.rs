@@ -189,6 +189,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Hide window while tracking continues - do not terminate tracker thread
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
