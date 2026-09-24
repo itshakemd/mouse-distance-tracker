@@ -1,6 +1,8 @@
 use std::{sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use serde::{Deserialize, Serialize};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +42,13 @@ fn formatted(px: f64, settings: &Settings) -> String {
         _ => format!("{:.2} km", inches * 0.0000254),
     }
 }
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
 
 #[tauri::command]
 fn get_snapshot(state: State<'\''_, SharedTracker>) -> Snapshot { snapshot(&state.lock().unwrap()) }
@@ -47,6 +56,12 @@ fn get_snapshot(state: State<'\''_, SharedTracker>) -> Snapshot { snapshot(&stat
 fn toggle_tracking(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
     let mut t = state.lock().unwrap();
     t.paused = !t.paused;
+    snapshot(&t)
+}
+#[tauri::command]
+fn reset_session(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
+    let mut t = state.lock().unwrap();
+    t.session_pixels = 0.0;
     snapshot(&t)
 }
 #[tauri::command]
@@ -100,10 +115,44 @@ pub fn run() {
         .setup(|app| {
             let tracker = Arc::new(Mutex::new(Tracker { session_pixels: 0.0, all_time_pixels: 0.0, paused: false, settings: Settings::default() }));
             app.manage(tracker.clone());
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("valid tray icon");
+            let window_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")).expect("valid window icon");
+            if let Some(window) = app.get_webview_window("main") { let _ = window.set_icon(window_icon); }
+            let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
+            let pause = MenuItem::with_id(app, "pause", "Pause / Resume Tracking", true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", "Hide Window", true, None::<&str>)?;
+            let reset = MenuItem::with_id(app, "reset", "Reset Session", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &hide, &pause, &reset, &quit])?;
+            TrayIconBuilder::with_id("main")
+                .icon(tray_icon)
+                .tooltip("Mouse Distance: 0.00 km")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        show_window(tray.app_handle());
+                    }
+                })
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => show_window(app),
+                    "hide" => { if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); } },
+                    "pause" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.paused = !t.paused; },
+                    "reset" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.session_pixels = 0.0; },
+                    "quit" => { app.exit(0); },
+                    _ => {}
+                })
+                .build(app)?;
             start_tracker(app.handle().clone(), tracker);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_snapshot, toggle_tracking, update_settings])
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![get_snapshot, toggle_tracking, reset_session, update_settings])
         .run(tauri::generate_context!())
         .expect("error while running application");
 }
