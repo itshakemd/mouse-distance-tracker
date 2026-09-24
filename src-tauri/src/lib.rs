@@ -1,5 +1,5 @@
-use std::{sync::{Arc, Mutex}, thread, time::Duration};
-use tauri::{AppHandle, Manager, State};
+use std::{sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
+use tauri::{AppHandle, Emitter, Manager, State};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -54,14 +54,14 @@ fn update_settings(app: AppHandle, state: State<'\''_, SharedTracker>, settings:
     if settings.ppi < 20.0 || settings.ppi > 1000.0 { return Err("PPI must be between 20 and 1000".into()); }
     if !["px", "m", "km"].contains(&settings.unit.as_str()) { return Err("Invalid unit".into()); }
     let mut t = state.lock().unwrap();
-    t.data_settings(settings);
+    t.settings = settings;
     Ok(snapshot(&t))
 }
-impl Tracker { fn data_settings(&mut self, s: Settings) { self.settings = s; } }
 
-fn start_tracker(shared: SharedTracker) {
+fn start_tracker(app: AppHandle, shared: SharedTracker) {
     thread::spawn(move || {
         let mut previous: Option<(i32, i32)> = None;
+        let mut last_publish = Instant::now();
         loop {
             #[cfg(target_os = "windows")]
             let current = unsafe {
@@ -83,6 +83,11 @@ fn start_tracker(shared: SharedTracker) {
                 }
                 previous = Some(pos);
             }
+            if last_publish.elapsed() >= Duration::from_millis(750) {
+                let snap = { snapshot(&shared.lock().unwrap()) };
+                let _ = app.emit("tracker-update", &snap);
+                last_publish = Instant::now();
+            }
             thread::sleep(Duration::from_millis(16));
         }
     });
@@ -95,7 +100,7 @@ pub fn run() {
         .setup(|app| {
             let tracker = Arc::new(Mutex::new(Tracker { session_pixels: 0.0, all_time_pixels: 0.0, paused: false, settings: Settings::default() }));
             app.manage(tracker.clone());
-            start_tracker(tracker);
+            start_tracker(app.handle().clone(), tracker);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![get_snapshot, toggle_tracking, update_settings])
