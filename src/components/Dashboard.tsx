@@ -1,12 +1,18 @@
+import { Pause, Play } from "lucide-react";
 import type { DistanceUnit, TrackerSnapshot } from "../model/tracker";
 import { distanceValue, formatDistance } from "../utils/distance";
 
 interface DashboardProps {
   snapshot: TrackerSnapshot;
-  onUnitChange?: (unit: DistanceUnit) => Promise<void>;
+  onToggleTracking: () => Promise<void>;
+  onUnitChange: (unit: DistanceUnit) => Promise<void>;
 }
 
-export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
+export function Dashboard({
+  snapshot,
+  onToggleTracking,
+  onUnitChange,
+}: DashboardProps) {
   const stats = [
     ["Today", snapshot.todayPixels],
     ["This Week", snapshot.weekPixels],
@@ -26,7 +32,9 @@ export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
           <select
             aria-label="Measurement unit"
             value={snapshot.settings.unit}
-            onChange={(event) => void onUnitChange?.(event.target.value as DistanceUnit)}
+            onChange={(event) =>
+              void onUnitChange(event.target.value as DistanceUnit)
+            }
           >
             <option value="px">px</option>
             <option value="m">m</option>
@@ -42,6 +50,17 @@ export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
             <b>{formatDistance(pixels, snapshot.settings)}</b>
           </article>
         ))}
+      </section>
+
+      <section className="controls">
+        <button
+          className="primary"
+          type="button"
+          onClick={() => void onToggleTracking()}
+        >
+          {snapshot.paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+          {snapshot.paused ? "Resume tracking" : "Pause tracking"}
+        </button>
       </section>
     </main>
   );

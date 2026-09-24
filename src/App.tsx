@@ -8,6 +8,7 @@ export default function App() {
   return (
     <Dashboard
       snapshot={tracker.snapshot}
+      onToggleTracking={tracker.toggleTracking}
       onUnitChange={tracker.changeUnit}
     />
   );
