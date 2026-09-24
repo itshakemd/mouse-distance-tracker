@@ -1,4 +1,4 @@
-use chrono::{Local, NaiveDate};
+use chrono::{Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -32,6 +32,9 @@ struct Tracker {
 struct Snapshot {
     session_pixels: f64,
     today_pixels: f64,
+    week_pixels: f64,
+    month_pixels: f64,
+    year_pixels: f64,
     all_time_pixels: f64,
     paused: bool,
     settings: Settings,
@@ -51,8 +54,17 @@ fn persist(app: &AppHandle, tracker: &Tracker) {
 }
 fn snapshot(t: &Tracker) -> Snapshot {
     let today = Local::now().date_naive();
-    let today_px = t.data.days.get(&today.format("%Y-%m-%d").to_string()).copied().unwrap_or(0.0);
-    Snapshot { session_pixels: t.session_pixels, today_pixels: today_px, all_time_pixels: t.data.all_time_pixels, paused: t.paused, settings: t.data.settings.clone() }
+    let week_start = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
+    let (mut today_px, mut week_px, mut month_px, mut year_px) = (0.0, 0.0, 0.0, 0.0);
+    for (key, value) in &t.data.days {
+        if let Ok(date) = NaiveDate::parse_from_str(key, "%Y-%m-%d") {
+            if date == today { today_px += value; }
+            if date >= week_start && date <= today { week_px += value; }
+            if date.year() == today.year() && date.month() == today.month() { month_px += value; }
+            if date.year() == today.year() { year_px += value; }
+        }
+    }
+    Snapshot { session_pixels: t.session_pixels, today_pixels: today_px, week_pixels: week_px, month_pixels: month_px, year_pixels: year_px, all_time_pixels: t.data.all_time_pixels, paused: t.paused, settings: t.data.settings.clone() }
 }
 fn formatted(px: f64, settings: &Settings) -> String {
     let inches = px / settings.ppi.max(1.0);
