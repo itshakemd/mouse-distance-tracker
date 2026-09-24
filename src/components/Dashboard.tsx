@@ -1,17 +1,16 @@
+import type { DistanceUnit, TrackerSnapshot } from "../model/tracker";
+
 interface DashboardProps {
-  distance?: string;
-  today?: string;
-  week?: string;
-  month?: string;
-  year?: string;
+  snapshot: TrackerSnapshot;
+  onUnitChange?: (unit: DistanceUnit) => void;
 }
 
-export function Dashboard({ distance = "0.00", today = "0.00 km", week = "0.00 km", month = "0.00 km", year = "0.00 km" }: DashboardProps) {
+export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
   const stats = [
-    ["Today", today],
-    ["This Week", week],
-    ["This Month", month],
-    ["This Year", year],
+    ["Today", snapshot.todayPixels],
+    ["This Week", snapshot.weekPixels],
+    ["This Month", snapshot.monthPixels],
+    ["This Year", snapshot.yearPixels],
   ] as const;
 
   return (
@@ -20,8 +19,12 @@ export function Dashboard({ distance = "0.00", today = "0.00 km", week = "0.00 k
         <img className="app-logo" src="/mouse.png" alt="" />
         <p>Distance today</p>
         <div className="distance-value">
-          <strong>{distance}</strong>
-          <select aria-label="Measurement unit" defaultValue="km">
+          <strong>{snapshot.todayPixels}</strong>
+          <select
+            aria-label="Measurement unit"
+            value={snapshot.settings.unit}
+            onChange={(e) => onUnitChange?.(e.target.value as DistanceUnit)}
+          >
             <option value="px">px</option>
             <option value="m">m</option>
             <option value="km">km</option>
@@ -30,10 +33,10 @@ export function Dashboard({ distance = "0.00", today = "0.00 km", week = "0.00 k
       </section>
 
       <section className="stats" aria-label="Distance statistics">
-        {stats.map(([label, value]) => (
+        {stats.map(([label, pixels]) => (
           <article key={label}>
             <span>{label}</span>
-            <b>{value}</b>
+            <b>{pixels}</b>
           </article>
         ))}
       </section>
