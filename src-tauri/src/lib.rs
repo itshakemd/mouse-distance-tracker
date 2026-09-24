@@ -138,6 +138,9 @@ fn start_tracker(app: AppHandle, shared: SharedTracker) {
             if last_publish.elapsed() >= Duration::from_millis(750) {
                 let snap = { snapshot(&shared.lock().unwrap()) };
                 let _ = app.emit("tracker-update", &snap);
+                if let Some(tray) = app.tray_by_id("main") {
+                    let _ = tray.set_tooltip(Some(format!("Mouse Distance: {}", formatted(snap.today_pixels, &snap.settings))));
+                }
                 last_publish = Instant::now();
             }
             if last_save.elapsed() >= Duration::from_secs(10) {
