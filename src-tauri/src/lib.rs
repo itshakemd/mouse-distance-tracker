@@ -83,23 +83,23 @@ fn show_window(app: &AppHandle) {
 }
 
 #[tauri::command]
-fn get_snapshot(state: State<'\''_, SharedTracker>) -> Snapshot { snapshot(&state.lock().unwrap()) }
+fn get_snapshot(state: State<'_, SharedTracker>) -> Snapshot { snapshot(&state.lock().unwrap()) }
 #[tauri::command]
-fn toggle_tracking(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
+fn toggle_tracking(app: AppHandle, state: State<'_, SharedTracker>) -> Snapshot {
     let mut t = state.lock().unwrap();
     t.paused = !t.paused;
     persist(&app, &t);
     snapshot(&t)
 }
 #[tauri::command]
-fn reset_session(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
+fn reset_session(app: AppHandle, state: State<'_, SharedTracker>) -> Snapshot {
     let mut t = state.lock().unwrap();
     t.session_pixels = 0.0;
     persist(&app, &t);
     snapshot(&t)
 }
 #[tauri::command]
-fn update_settings(app: AppHandle, state: State<'\''_, SharedTracker>, settings: Settings) -> Result<Snapshot, String> {
+fn update_settings(app: AppHandle, state: State<'_, SharedTracker>, settings: Settings) -> Result<Snapshot, String> {
     if settings.ppi < 20.0 || settings.ppi > 1000.0 { return Err("PPI must be between 20 and 1000".into()); }
     if !["px", "m", "km"].contains(&settings.unit.as_str()) { return Err("Invalid unit".into()); }
     let mut t = state.lock().unwrap();
@@ -181,8 +181,22 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_window(app),
                     "hide" => { if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); } },
-                    "pause" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.paused = !t.paused; persist(app, &t); },
-                    "reset" => { let state = app.state::<SharedTracker>(); let mut t = state.lock().unwrap(); t.session_pixels = 0.0; persist(app, &t); },
+                    "pause" => {
+                        let state = app.state::<SharedTracker>();
+                        let mut t = state.lock().unwrap();
+                        t.paused = !t.paused;
+                        persist(app, &t);
+                        let snap = snapshot(&t);
+                        let _ = app.emit("tracker-update", &snap);
+                    },
+                    "reset" => {
+                        let state = app.state::<SharedTracker>();
+                        let mut t = state.lock().unwrap();
+                        t.session_pixels = 0.0;
+                        persist(app, &t);
+                        let snap = snapshot(&t);
+                        let _ = app.emit("tracker-update", &snap);
+                    },
                     "quit" => { let state = app.state::<SharedTracker>(); persist(app, &state.lock().unwrap()); app.exit(0); },
                     _ => {}
                 })
