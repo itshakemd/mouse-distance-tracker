@@ -1,8 +1,9 @@
 import type { DistanceUnit, TrackerSnapshot } from "../model/tracker";
+import { distanceValue, formatDistance } from "../utils/distance";
 
 interface DashboardProps {
   snapshot: TrackerSnapshot;
-  onUnitChange?: (unit: DistanceUnit) => void;
+  onUnitChange?: (unit: DistanceUnit) => Promise<void>;
 }
 
 export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
@@ -13,17 +14,19 @@ export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
     ["This Year", snapshot.yearPixels],
   ] as const;
 
+  const today = formatDistance(snapshot.todayPixels, snapshot.settings);
+
   return (
     <main className="app-shell">
       <section className="hero">
         <img className="app-logo" src="/mouse.png" alt="" />
         <p>Distance today</p>
         <div className="distance-value">
-          <strong>{snapshot.todayPixels}</strong>
+          <strong>{distanceValue(today)}</strong>
           <select
             aria-label="Measurement unit"
             value={snapshot.settings.unit}
-            onChange={(e) => onUnitChange?.(e.target.value as DistanceUnit)}
+            onChange={(event) => void onUnitChange?.(event.target.value as DistanceUnit)}
           >
             <option value="px">px</option>
             <option value="m">m</option>
@@ -36,7 +39,7 @@ export function Dashboard({ snapshot, onUnitChange }: DashboardProps) {
         {stats.map(([label, pixels]) => (
           <article key={label}>
             <span>{label}</span>
-            <b>{pixels}</b>
+            <b>{formatDistance(pixels, snapshot.settings)}</b>
           </article>
         ))}
       </section>

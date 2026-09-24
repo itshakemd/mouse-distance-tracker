@@ -1,23 +1,44 @@
 use std::{sync::{Arc, Mutex}, thread, time::Duration};
 use tauri::{Manager, State};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Settings {
+    unit: String,
+    ppi: f64,
+}
+impl Default for Settings {
+    fn default() -> Self { Self { unit: "km".into(), ppi: 96.0 } }
+}
 
 struct Tracker {
     session_pixels: f64,
     all_time_pixels: f64,
     paused: bool,
+    settings: Settings,
 }
 type SharedTracker = Arc<Mutex<Tracker>>;
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Snapshot {
     session_pixels: f64,
     all_time_pixels: f64,
     paused: bool,
+    settings: Settings,
 }
 
 fn snapshot(t: &Tracker) -> Snapshot {
-    Snapshot { session_pixels: t.session_pixels, all_time_pixels: t.all_time_pixels, paused: t.paused }
+    Snapshot { session_pixels: t.session_pixels, all_time_pixels: t.all_time_pixels, paused: t.paused, settings: t.settings.clone() }
+}
+fn formatted(px: f64, settings: &Settings) -> String {
+    let inches = px / settings.ppi.max(1.0);
+    match settings.unit.as_str() {
+        "px" => format!("{:.0} px", px),
+        "m" => format!("{:.2} m", inches * 0.0254),
+        _ => format!("{:.2} km", inches * 0.0000254),
+    }
 }
 
 #[tauri::command]
@@ -60,7 +81,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let tracker = Arc::new(Mutex::new(Tracker { session_pixels: 0.0, all_time_pixels: 0.0, paused: false }));
+            let tracker = Arc::new(Mutex::new(Tracker { session_pixels: 0.0, all_time_pixels: 0.0, paused: false, settings: Settings::default() }));
             app.manage(tracker.clone());
             start_tracker(tracker);
             Ok(())
