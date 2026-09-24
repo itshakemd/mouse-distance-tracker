@@ -1,5 +1,5 @@
 use std::{sync::{Arc, Mutex}, thread, time::Duration};
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -42,9 +42,22 @@ fn formatted(px: f64, settings: &Settings) -> String {
 }
 
 #[tauri::command]
-fn get_snapshot(state: State<'\''_, SharedTracker>) -> Snapshot {
-    snapshot(&state.lock().unwrap())
+fn get_snapshot(state: State<'\''_, SharedTracker>) -> Snapshot { snapshot(&state.lock().unwrap()) }
+#[tauri::command]
+fn toggle_tracking(app: AppHandle, state: State<'\''_, SharedTracker>) -> Snapshot {
+    let mut t = state.lock().unwrap();
+    t.paused = !t.paused;
+    snapshot(&t)
 }
+#[tauri::command]
+fn update_settings(app: AppHandle, state: State<'\''_, SharedTracker>, settings: Settings) -> Result<Snapshot, String> {
+    if settings.ppi < 20.0 || settings.ppi > 1000.0 { return Err("PPI must be between 20 and 1000".into()); }
+    if !["px", "m", "km"].contains(&settings.unit.as_str()) { return Err("Invalid unit".into()); }
+    let mut t = state.lock().unwrap();
+    t.data_settings(settings);
+    Ok(snapshot(&t))
+}
+impl Tracker { fn data_settings(&mut self, s: Settings) { self.settings = s; } }
 
 fn start_tracker(shared: SharedTracker) {
     thread::spawn(move || {
@@ -53,8 +66,7 @@ fn start_tracker(shared: SharedTracker) {
             #[cfg(target_os = "windows")]
             let current = unsafe {
                 let mut p = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
-                (windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) != 0)
-                    .then_some((p.x, p.y))
+                (windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) != 0).then_some((p.x, p.y))
             };
             #[cfg(not(target_os = "windows"))]
             let current: Option<(i32, i32)> = None;
@@ -86,7 +98,7 @@ pub fn run() {
             start_tracker(tracker);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_snapshot])
+        .invoke_handler(tauri::generate_handler![get_snapshot, toggle_tracking, update_settings])
         .run(tauri::generate_context!())
         .expect("error while running application");
 }
