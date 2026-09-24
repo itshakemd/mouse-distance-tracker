@@ -126,11 +126,13 @@ fn start_tracker(app: AppHandle, shared: SharedTracker) {
                     let dx = (pos.0 - old.0) as f64;
                     let dy = (pos.1 - old.1) as f64;
                     let distance = (dx * dx + dy * dy).sqrt();
-                    let mut t = shared.lock().unwrap();
-                    if !t.paused {
-                        t.session_pixels += distance;
-                        t.data.all_time_pixels += distance;
-                        *t.data.days.entry(Local::now().format("%Y-%m-%d").to_string()).or_default() += distance;
+                    if distance < 10_000.0 {
+                        let mut t = shared.lock().unwrap();
+                        if !t.paused {
+                            t.session_pixels += distance;
+                            t.data.all_time_pixels += distance;
+                            *t.data.days.entry(Local::now().format("%Y-%m-%d").to_string()).or_default() += distance;
+                        }
                     }
                 }
                 previous = Some(pos);
@@ -189,7 +191,6 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Hide window while tracking continues - do not terminate tracker thread
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
